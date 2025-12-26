@@ -1,14 +1,27 @@
 import streamlit as st
 import time
-import openai
+from groq import Groq
 from questions import questions
 from styles_data import styles_info
+from stats_manager import add_study_time, load_stats, save_stats, add_task, toggle_task, delete_task
+from pomodoro import render_pomodoro_timer
+from mindmap import render_mind_map
 
 # Page config
 st.set_page_config(page_title="LearnFlow", page_icon="logo.png", layout="wide")
 
-# LOGO SETUP removed
-# st.logo("logo.png", size="large")
+# Initialize Session Timer
+if "start_time" not in st.session_state:
+    st.session_state.start_time = time.time()
+
+# Function to update time on interaction
+def track_time():
+    now = time.time()
+    elapsed = now - st.session_state.start_time
+    # Only update if meaningful time passed (> 10s)
+    if elapsed > 10:
+        add_study_time(elapsed)
+        st.session_state.start_time = now # Reset timer
 
 # Language Selection
 lang_options = {
@@ -26,28 +39,50 @@ with st.sidebar:
     
     st.divider()
     
-    # API Key Input
-    st.header("AI Settings")
-    api_key = st.text_input("OpenAI API Key", type="password", help="Get your key at platform.openai.com")
-    if api_key:
-        st.session_state.api_key = api_key
+    st.divider()
+    # API Key Input Removed by User Request
+
+    # GAMIFICATION UI
+    stats = load_stats()
+    user_level = stats.get("level", 1)
+    user_xp = stats.get("xp", 0)
+    xp_needed = user_level * 100
     
+    st.markdown(f"### 🛡️ Level {user_level}")
+    st.progress(min(user_xp / xp_needed, 1.0))
+    st.caption(f"XP: {user_xp} / {xp_needed}")
+    
+    st.divider()
+
+    # RADIO WIDGET
+    with st.expander("🎵 Study Radio", expanded=False):
+        # Embed User Selection
+        st.components.v1.iframe("https://www.youtube.com/embed/mM1dIwGO00w", height=200)
+        st.caption("Note: Audio may stop if you switch pages.")
+
     st.divider()
     if st.button("🏠 Home / Início", use_container_width=True):
         st.session_state.app_mode = "home"
         st.session_state.page_title_override = None
         st.rerun()
 
-# OpenAI Helpers
+# Groq Helpers
 def get_ai_client():
+    # Priority: Session State > Secrets > None
+    api_key = None
     if "api_key" in st.session_state and st.session_state.api_key:
-        return openai.OpenAI(api_key=st.session_state.api_key)
+        api_key = st.session_state.api_key
+    elif "api_key" in st.secrets:
+        api_key = st.secrets["api_key"]
+    
+    if api_key:
+        return Groq(api_key=api_key)
     return None
 
-def get_ai_response(messages, model="gpt-3.5-turbo"):
+def get_ai_response(messages, model="llama-3.3-70b-versatile"):
     client = get_ai_client()
     if not client:
-        return "⚠️ Please enter your OpenAI API Key in the sidebar to use AI features."
+        return "⚠️ Please enter your Groq API Key in the sidebar (or configure secrets) to use AI features."
     
     try:
         response = client.chat.completions.create(
@@ -210,67 +245,193 @@ st.markdown("""
         padding-bottom: 6rem;
     }
     
+    /* ANIMATIONS */
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translate3d(0, 40px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
+    }
+
+    @keyframes gradientBG {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    /* Apply animation to main container */
+    .block-container {
+        animation-duration: 0.8s;
+        animation-fill-mode: both;
+        animation-name: fadeInUp;
+    }
+
+    /* GLOBAL BACKGROUND - VISIBLE CALM WAVES */
+    .stApp {
+        /* Enhanced Visibility Palette: Deep Navy -> Bright Calm Blue -> Royal Blue -> Deep Navy */
+        /* Increased contrast to make waves visible, but kept blue spectrum */
+        background: linear-gradient(-45deg, #0d1b2a, #415a77, #1b4965, #0d1b2a);
+        background-size: 400% 400%;
+        animation: gradientBG 15s ease infinite; /* 15s for visible movement */
+        height: 100vh;
+        position: relative; /* For the glow overlay */
+    }
+
+    /* MOUSE GLOW OVERLAY */
+    .stApp::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none; /* Let clicks pass through */
+        z-index: 1; /* Above background, below content */
+        /* Radial gradient following the mouse CSS vars - Large Ambient Glow */
+        background: radial-gradient(600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(72, 191, 227, 0.1), transparent 40%);
+    }
+    
+    /* CURSOR RING ANIMATION */
+    @keyframes cursorSpin {
+        0% { transform: translate(-50%, -50%) rotate(0deg); }
+        100% { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+    
+    .stApp::after {
+        content: "";
+        position: fixed;
+        top: var(--mouse-y, -100px);
+        left: var(--mouse-x, -100px);
+        width: 50px;
+        height: 50px;
+        border: 2px dashed rgba(255, 255, 255, 0.5); /* Dashed to make rotation visible */
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 9999; /* Topmost overlay */
+        animation: cursorSpin 5s linear infinite; /* Slow consistent rotation */
+        box-shadow: 0 0 15px rgba(72, 191, 227, 0.3);
+    }
+
+    /* SIDEBAR STYLING - SERENE */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(-45deg, #0d1b2a, #415a77, #1b4965, #0d1b2a);
+        background-size: 400% 400%;
+        animation: gradientBG 15s ease infinite;
+        border-right: 1px solid rgba(55, 90, 127, 0.3);
+    }
+    
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3, 
+    section[data-testid="stSidebar"] label {
+        color: #dbe9f4 !important; /* Soft White/Blue */
+        font-family: 'Outfit', sans-serif;
+    }
+
+    /* Force Radio/Expander Header White */
+    section[data-testid="stSidebar"] div[data-testid="stExpander"] p,
+    section[data-testid="stSidebar"] div[data-testid="stExpander"] summary {
+        color: #ffffff !important;
+        font-weight: 700;
+    }
+    
+    /* IMPORT MODERN FONT */
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap');
+    
     /* GLASSMORPHISM CARDS */
     .card-container {
-        background: rgba(2, 62, 138, 0.4); /* Secondary Blue low opacity */
+        font-family: 'Outfit', sans-serif; 
+        background: rgba(31, 58, 95, 0.4); /* Muted Blue Glass */
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
         border-radius: 20px;
-        border: 1px solid rgba(0, 180, 216, 0.2); /* Cyan border */
+        border: 1px solid rgba(72, 191, 227, 0.2); 
         padding: 30px 20px;
         text-align: center;
         margin-bottom: 25px;
         transition: all 0.3s ease-in-out;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         /* EQUAL HEIGHT ENFORCEMENT */
         height: 280px; 
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
+        position: relative;
+        z-index: 10; /* Ensure cards are above glow */
     }
     
     .card-container:hover {
         transform: translateY(-5px);
-        background: rgba(2, 62, 138, 0.6);
-        box-shadow: 0 10px 20px rgba(0, 180, 216, 0.2); /* Cyan Glow */
-        border: 1px solid rgba(0, 180, 216, 0.8); 
+        background: rgba(31, 58, 95, 0.6);
+        box-shadow: 0 10px 20px rgba(72, 191, 227, 0.2); 
+        border: 1px solid rgba(72, 191, 227, 0.6); 
     }
     
     .emoji-icon {
         font-size: 60px;
         margin-bottom: 15px;
-        filter: drop-shadow(0 0 10px rgba(0, 180, 216, 0.5));
+        filter: drop-shadow(0 0 10px rgba(72, 191, 227, 0.5));
+        position: relative; /* For tooltip positioning */
+        cursor: help;
+    }
+    
+    /* TOOLTIP HOVER EFFECT */
+    .emoji-icon:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 28, 46, 0.95);
+        border: 1px solid rgba(72, 191, 227, 0.5);
+        color: #edf6f9;
+        padding: 5px 12px;
+        border-radius: 8px;
+        white-space: nowrap;
+        font-size: 0.8rem;
+        font-family: 'Outfit', sans-serif;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        margin-bottom: 8px;
+        z-index: 1000;
+        opacity: 0;
+        animation: tooltipFadeIn 0.3s forwards;
+    }
+    
+    @keyframes tooltipFadeIn {
+        from { opacity: 0; transform: translate(-50%, 5px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
     }
     
     .card-container h3 {
+        font-family: 'Outfit', sans-serif;
         font-weight: 700;
         margin-bottom: 10px;
-        color: #CAF0F8; /* Light Cyan Text */
+        color: #edf6f9; /* Soft White */
     }
     
     .card-container p {
+        font-family: 'Outfit', sans-serif;
         font-size: 0.9em;
         opacity: 0.9;
         margin-bottom: 20px;
-        color: #ADE8F4;
+        color: #dbe9f4;
     }
     
     /* CUSTOM BUTTONS */
     div.stButton > button {
-        background: linear-gradient(135deg, #0077B6 0%, #00B4D8 100%);
+        font-family: 'Outfit', sans-serif;
+        background: linear-gradient(135deg, #375a7f 0%, #1f3a5f 100%); /* Muted Blue Gradient */
         color: white;
         border: none;
         border-radius: 12px;
         padding: 0.5rem 1rem;
         font-weight: 600;
         transition: all 0.2s;
-        box-shadow: 0 4px 6px rgba(0, 180, 216, 0.2);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
     }
     
     div.stButton > button:hover {
         transform: scale(1.02);
-        box-shadow: 0 6px 12px rgba(0, 180, 216, 0.4);
+        box-shadow: 0 6px 12px rgba(72, 191, 227, 0.3);
         border: none;
         color: white;
     }
@@ -281,20 +442,20 @@ st.markdown("""
         bottom: 0;
         left: 0;
         width: 100%;
-        background: rgba(0, 18, 51, 0.95); /* Deep Navy */
+        background: rgba(15, 28, 46, 0.95); /* Deep Slate */
         backdrop-filter: blur(10px);
-        border-top: 1px solid rgba(0, 180, 216, 0.2);
+        border-top: 1px solid rgba(72, 191, 227, 0.2);
         padding: 1rem 5rem;
         z-index: 1000;
         box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
     }
     .sticky-footer .stButton > button {
         background: transparent;
-        border: 1px solid #00B4D8;
-        color: #00B4D8;
+        border: 1px solid #375a7f;
+        color: #375a7f;
     }
      .sticky-footer .stButton > button:hover {
-        background: #00B4D8;
+        background: #375a7f;
         color: white;
     }
     
@@ -304,23 +465,106 @@ st.markdown("""
         padding: 1rem;
         border-radius: 12px;
         margin-bottom: 0.5rem;
+        font-family: 'Outfit', sans-serif;
     }
     
     .stChatMessage[data-testid="stChatMessage"]:nth-child(2n) {
-        background: rgba(0, 180, 216, 0.1); 
+        background: rgba(72, 191, 227, 0.1); 
     }
     
-    /* TEXT GRADIENT */
+    /* FORCE HIGH CONTRAST TEXT */
+    h1, h2, h3, h4, h5, h6, .stMarkdown p, .stMarkdown li, .stText {
+        color: #e0fbfc !important; /* Light text for readability */
+    }
+    
+    /* Chat Message Specifics */
+    .stChatMessage p {
+        color: #e0fbfc !important;
+    }
+    
+    /* Fix Input Labels */
+    .stTextInput label, .stTextArea label, .stSelectbox label, .stNumberInput label {
+        color: #dbe9f4 !important;
+    }
+    
+    /* TEXT GRADIENT - SERENE */
     .text-gradient {
-        background: linear-gradient(to right, #4361EE 0%, #4CC9F0 100%);
+        font-family: 'Outfit', sans-serif;
+        background: linear-gradient(120deg, #dbe9f4 0%, #a2d2ff 50%, #bde0fe 100%); /* Soft Paste Blue */
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-weight: 800;
-        font-size: 3.5rem;
-        padding-bottom: 10px; /* Prevent clipping */
+        font-weight: 900;
+        text-transform: uppercase; 
+        font-size: 4.5rem; 
+        letter-spacing: -3px; 
+        padding-bottom: 20px; 
+        text-shadow: 0 10px 30px rgba(72, 191, 227, 0.2); 
+    }
+
+    /* SOCIALS FOOTER */
+    .social-footer {
+        margin-top: 100px;
+        padding: 50px 20px;
+        background: rgba(15, 28, 46, 0.6); /* Semi-transparent Deep Slate */
+        border-top: 1px solid rgba(72, 191, 227, 0.2);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(5px);
+    }
+    
+    .social-links {
+        display: flex;
+        gap: 30px;
+        margin-top: 20px;
+    }
+    
+    .social-icon {
+        color: #dbe9f4;
+        font-size: 24px;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        padding: 10px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.05);
+        width: 50px;
+        height: 50px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .social-icon:hover {
+        color: #fff;
+        background: rgba(72, 191, 227, 0.4);
+        transform: translateY(-5px);
+        box-shadow: 0 0 15px rgba(72, 191, 227, 0.5);
+    }
+    
+    .footer-text {
+        font-family: 'Outfit', sans-serif;
+        color: #8da9c4;
+        margin-top: 20px;
+        font-size: 0.9rem;
     }
 
 </style>
+
+<!-- LOAD FONTAWESOME FOR ICONS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+<!-- JAVASCRIPT FOR MOUSE TRACKING -->
+<script>
+    const doc = window.parent.document;
+    doc.addEventListener('mousemove', function(e) {
+        const x = e.clientX;
+        const y = e.clientY;
+        document.documentElement.style.setProperty('--mouse-x', x + 'px');
+        document.documentElement.style.setProperty('--mouse-y', y + 'px');
+    });
+</script>
 """, unsafe_allow_html=True)
 
 
@@ -346,7 +590,7 @@ def render_home():
     with col1:
         st.markdown(f"""
         <div class="card-container">
-            <div class="emoji-icon">🤖</div>
+            <div class="emoji-icon" data-tooltip="Ask questions & get explanations">🤖</div>
             <h3>{current_ui['card1_title']}</h3>
             <p>{current_ui['card1_desc']}</p>
         </div>
@@ -358,7 +602,7 @@ def render_home():
     with col2:
         st.markdown(f"""
         <div class="card-container">
-            <div class="emoji-icon">🧠</div>
+            <div class="emoji-icon" data-tooltip="Discover your learning style">🧠</div>
             <h3>{current_ui['card2_title']}</h3>
             <p>{current_ui['card2_desc']}</p>
         </div>
@@ -370,13 +614,81 @@ def render_home():
     with col3:
         st.markdown(f"""
         <div class="card-container">
-            <div class="emoji-icon">📝</div>
+            <div class="emoji-icon" data-tooltip="Check your answers automatically">📝</div>
             <h3>{current_ui['card3_title']}</h3>
             <p>{current_ui['card3_desc']}</p>
         </div>
         """, unsafe_allow_html=True)
         if st.button(current_ui['card3_btn'], key="btn_corrector", use_container_width=True):
             st.session_state.app_mode = "corrector"
+            st.rerun()
+
+    # --- ROW 2 (SCROLL DOWN) ---
+    st.write("") 
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="card-container">
+            <div class="emoji-icon" data-tooltip="Create tests from your notes">🧩</div>
+            <h3>Quiz Generator</h3>
+            <p>Generate tests from your notes.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Open Quiz Gen 🧠", use_container_width=True):
+            st.session_state.app_mode = "quiz_gen"
+            st.rerun()
+
+    with col2:
+        st.markdown("""
+        <div class="card-container">
+            <div class="emoji-icon" data-tooltip="Track streaks & study habits">📊</div>
+            <h3>Profile & Stats</h3>
+            <p>Track your streaks and habits.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Open Dashboard 📈", use_container_width=True):
+            st.session_state.app_mode = "dashboard"
+            st.rerun()
+
+    with col3:
+        st.markdown("""
+        <div class="card-container">
+            <div class="emoji-icon" data-tooltip="Manage tasks & priorities">📌</div>
+            <h3>Study Planner</h3>
+            <p>Priority To-Do List.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Open To-Do List", use_container_width=True):
+            st.session_state.app_mode = "todo"
+            st.rerun()
+
+    # --- ROW 3 (POMODORO) ---
+    st.write("")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="card-container">
+            <div class="emoji-icon" data-tooltip="25min Focus / 5min Break">🍅</div>
+            <h3>Pomodoro Focus</h3>
+            <p>Timer for deep work sessions.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Start Focus ⏱️", use_container_width=True):
+            st.session_state.app_mode = "pomodoro"
+            st.rerun()
+
+    with col2:
+        st.markdown("""
+        <div class="card-container">
+            <div class="emoji-icon" data-tooltip="Visualize topics with AI">🕸️</div>
+            <h3>Mind Map</h3>
+            <p>Visual diagrams from notes.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Create Map 🗺️", use_container_width=True):
+            st.session_state.app_mode = "mindmap"
             st.rerun()
 
 def render_analyzer():
@@ -521,11 +833,152 @@ def render_corrector():
         else:
             st.warning("Please enter some text.")
 
+def render_quiz_generator():
+    st.markdown(f"<h2 class='text-gradient'>Quiz & Tasks Generator 🧠</h2>", unsafe_allow_html=True)
+    st.write("Transform your notes or text into a study quiz or learning tasks instantly.")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        source_text = st.text_area("Paste your notes/text here:", height=300, placeholder="Paste a chapter summary, article, or your own notes...")
+    
+    with col2:
+        st.markdown("### Configuration")
+        quiz_type = st.selectbox("Type", ["Multiple Choice Quiz", "Learning Tasks / Open Questions", "True/False Test"])
+        num_questions = st.number_input("Number of Questions", min_value=1, max_value=20, value=5)
+        difficulty = st.select_slider("Difficulty", options=["Easy", "Medium", "Hard"], value="Medium")
+        
+        generate_btn = st.button("Generate Quiz 🚀", use_container_width=True)
+    
+    if generate_btn:
+        if not source_text:
+            st.warning("Please paste some text first!")
+            return
+        
+        with st.spinner(f"Generating {difficulty} {quiz_type}..."):
+            prompt = (
+                f"Act as a strict teacher. Generate a {difficulty} {quiz_type} with {num_questions} questions based PROPERLY and ONLY on the following text.\n"
+                f"Language: {lang_code}.\n\n"
+                f"TEXT:\n{source_text}\n\n"
+                f"FORMAT REQUIREMENTS:\n"
+            )
+            
+            if quiz_type == "Multiple Choice Quiz":
+                prompt += "Format: Question, 4 Options (A,B,C,D), and then the Correct Answer hidden at the very end."
+            elif quiz_type == "True/False Test":
+                prompt += "Format: Statement, True/False option, and correct answer at the end."
+            else:
+                prompt += "Format: Open-ended questions or actionable learning tasks."
+            
+            messages = [{"role": "user", "content": prompt}]
+            response = get_ai_response(messages)
+            
+            st.divider()
+            st.markdown("### 📝 Generated Quiz")
+            st.write(response)
+
+
+def render_dashboard():
+    # Update stats before showing
+    track_time()
+    stats = load_stats()
+    
+    st.markdown(f"<h2 class='text-gradient'>Profile & Stats 📊</h2>", unsafe_allow_html=True)
+    
+    # METRICS
+    col1, col2, col3 = st.columns(3)
+    col1.metric("🔥 Streak", f"{stats['current_streak']} days")
+    col2.metric("⏳ Total Study Time", f"{int(stats['total_seconds'] / 60)} min")
+    col3.metric("📅 Last Session", stats['last_study_date'] if stats['last_study_date'] else "Today")
+    
+    st.divider()
+    
+    # CHARTS (Weekly Activity)
+    st.subheader("Weekly Activity (Minutes)")
+    weekly_data = stats.get("weekly_activity", {})
+    st.bar_chart(weekly_data)
+    
+    st.divider()
+    
+    # SETTINGS
+    st.subheader("Settings ⚙️")
+    reminders = st.toggle("Enable Push Reminders 🔔", value=stats.get("reminders_enabled", False))
+    if reminders != stats.get("reminders_enabled", False):
+        stats["reminders_enabled"] = reminders
+        save_stats(stats)
+        if reminders:
+            st.toast("✅ Reminders Enabled! We'll notify you.")
+        else:
+            st.toast("🔕 Reminders Disabled.")
+
+def render_todo_list():
+    st.markdown(f"<h2 class='text-gradient'>Study Planner & Tasks 📌</h2>", unsafe_allow_html=True)
+    
+    # --- ADD TASK FORM ---
+    with st.form("new_task"):
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            task_text = st.text_input("New Task", placeholder="Read Chapter 4...")
+        with col2:
+            priority = st.selectbox("Priority", ["High 🔴", "Medium 🟠", "Low 🔵"])
+        with col3:
+            st.write("") # Spacer to align button
+            st.write("") 
+            add_btn = st.form_submit_button("Add Task ➕")
+    
+    if add_btn and task_text:
+        add_task(task_text, priority)
+        st.success("Task Added!")
+        st.rerun()
+
+    # --- TASK LIST ---
+    st.write("")
+    stats = load_stats()
+    tasks = stats.get("tasks", [])
+    
+    if not tasks:
+        st.info("No tasks yet. Add one above to get organized!")
+        return
+
+    # Sort: High > Medium > Low (Custom Sort Key)
+    priority_map = {"High 🔴": 0, "Medium 🟠": 1, "Low 🔵": 2}
+    sorted_tasks = sorted(enumerate(tasks), key=lambda x: (priority_map.get(x[1]['priority'], 99), x[1]['created_at']))
+    
+    st.subheader("Your Tasks")
+    
+    for original_index, task in sorted_tasks:
+        col_mark, col_text, col_del = st.columns([0.5, 4, 0.5])
+        
+        # Determine Color based on Priority
+        color_style = "color: #ADE8F4;"
+        if "High" in task['priority']: color_style = "color: #FF6B6B; font-weight: bold;"
+        elif "Medium" in task['priority']: color_style = "color: #FFD93D;"
+        
+        # Strikethrough if done
+        display_text = task['text']
+        if task['done']:
+            display_text = f"<s>{display_text}</s>"
+            color_style = "color: gray;"
+            
+        with col_mark:
+            if st.button("✅" if not task['done'] else "Undo", key=f"toggle_{original_index}"):
+                toggle_task(original_index)
+                st.rerun()
+                
+        with col_text:
+            st.markdown(f"<span style='font-size: 1.1rem; {color_style}'>{task['priority']} | {display_text}</span>", unsafe_allow_html=True)
+            
+        with col_del:
+            if st.button("🗑️", key=f"del_{original_index}"):
+                delete_task(original_index)
+                st.rerun()
+
 # --- MAIN DISPATCHER ---
 
 if "last_lang" not in st.session_state:
     st.session_state.last_lang = lang_code
 elif st.session_state.last_lang != lang_code:
+    track_time() # Save on exit
     st.session_state.app_mode = "home"
     st.session_state.last_lang = lang_code
     st.session_state.messages = [] 
@@ -533,10 +986,43 @@ elif st.session_state.last_lang != lang_code:
     st.rerun()
 
 if st.session_state.app_mode == "home":
+    track_time()
     render_home()
 elif st.session_state.app_mode == "analyzer":
+    track_time()
     render_analyzer()
 elif st.session_state.app_mode == "tutor":
+    track_time()
     render_tutor()
 elif st.session_state.app_mode == "corrector":
+    track_time()
     render_corrector()
+elif st.session_state.app_mode == "quiz_gen":
+    track_time()
+    render_quiz_generator()
+elif st.session_state.app_mode == "dashboard":
+    render_dashboard()
+elif st.session_state.app_mode == "todo":
+    render_todo_list()
+elif st.session_state.app_mode == "pomodoro":
+    render_pomodoro_timer()
+elif st.session_state.app_mode == "mindmap":
+    render_mind_map()
+
+# --- SOCIALS FOOTER ---
+st.markdown("""
+<div class="social-footer">
+    <div class="social-links">
+        <a href="https://github.com/cShiraishi" target="_blank" class="social-icon">
+            <i class="fab fa-github"></i>
+        </a>
+        <a href="https://linkedin.com/in/carlos-shiraishi" target="_blank" class="social-icon"> <!-- Placeholder based on name -->
+            <i class="fab fa-linkedin-in"></i>
+        </a>
+        <a href="mailto:contact@example.com" class="social-icon">
+            <i class="fas fa-envelope"></i>
+        </a>
+    </div>
+    <p class="footer-text">Built with 💙 by Carlos Shiraishi • © 2025 LearnFlow</p>
+</div>
+""", unsafe_allow_html=True)
