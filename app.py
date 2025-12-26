@@ -1,6 +1,6 @@
 import streamlit as st
 import time
-from groq import Groq
+import google.generativeai as genai
 from questions import questions
 from styles_data import styles_info
 from stats_manager import add_study_time, load_stats, save_stats, add_task, toggle_task, delete_task
@@ -66,30 +66,42 @@ with st.sidebar:
         st.session_state.page_title_override = None
         st.rerun()
 
-# Groq Helpers
-def get_ai_client():
-    # Priority: Session State > Secrets > None
+import google.generativeai as genai
+
+# ... (Previous imports remain, just removing Groq)
+
+# Gemini Helpers
+def get_ai_response(messages, model_name="gemini-2.5-flash"):
+    # Retrieve API Key
     api_key = None
     if "api_key" in st.session_state and st.session_state.api_key:
         api_key = st.session_state.api_key
-    elif "api_key" in st.secrets:
-        api_key = st.secrets["api_key"]
+    elif "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
     
-    if api_key:
-        return Groq(api_key=api_key)
-    return None
+    if not api_key:
+        return "⚠️ Please configure your Gemini API Key in `.streamlit/secrets.toml` or provide it."
 
-def get_ai_response(messages, model="llama-3.3-70b-versatile"):
-    client = get_ai_client()
-    if not client:
-        return "⚠️ Please enter your Groq API Key in the sidebar (or configure secrets) to use AI features."
-    
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages
-        )
-        return response.choices[0].message.content
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+        
+        # Convert messages to Gemini format (simplification)
+        # Gemini expects a prompt string or list of contents.
+        # For simple chat, we can concatenate or just send the last user message if stateless, 
+        # but for a "chat" we should construct history. 
+        # For this specific helper which seems to be used for one-off tasks (like Tutor/Corrector), 
+        # we'll constructing a single prompt if possible or standard chat.
+        
+        # 'messages' arg usually comes as list of dicts: [{"role": "user", "content": "..."}]
+        # Let's flatten it for simplicity or use start_chat.
+        
+        full_prompt = ""
+        for msg in messages:
+             full_prompt += f"{msg['role'].upper()}: {msg['content']}\n"
+        
+        response = model.generate_content(full_prompt)
+        return response.text
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 

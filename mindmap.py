@@ -1,5 +1,5 @@
 import streamlit as st
-from groq import Groq
+import google.generativeai as genai
 import os
 from stats_manager import add_xp
 
@@ -33,17 +33,24 @@ def render_mind_map():
             if not user_input:
                 st.warning("Please enter some text first.")
             else:
-                client = get_groq_client()
-                if not client:
+                api_key = None
+                if "api_key" in st.session_state and st.session_state.api_key:
+                    api_key = st.session_state.api_key
+                elif "GEMINI_API_KEY" in st.secrets:
+                    api_key = st.secrets["GEMINI_API_KEY"]
+
+                if not api_key:
                     st.warning("⚠️ API Key missing. Please enter it below:")
-                    api_key_input = st.text_input("Groq API Key (Temporary)", type="password", key="mindmap_key_input")
+                    api_key_input = st.text_input("Gemini API Key (Temporary)", type="password", key="mindmap_key_input")
                     if api_key_input:
                         st.session_state.api_key = api_key_input
                         st.success("Key saved! Click Generate again.")
-                        # Ideally rerunning would be smoother but pressing the button again works too.
                 else:
                     with st.spinner("Brainstorming connections..."):
                         try:
+                            genai.configure(api_key=api_key)
+                            model = genai.GenerativeModel('gemini-2.5-flash')
+                            
                             # Prompt for Graphviz DOT
                             prompt = f"""
                             Create a Graphviz DOT code for a mind map about the following text:
@@ -57,16 +64,8 @@ def render_mind_map():
                             5. Use 'digraph G' and ensuring logic flow.
                             """
                             
-                            completion = client.chat.completions.create(
-                                messages=[
-                                    {"role": "system", "content": "You are a data visualization expert capable of generating Graphviz DOT code. Return ONLY raw DOT code."},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                model="llama-3.3-70b-versatile",
-                                temperature=0.5,
-                            )
-                            
-                            dot_code = completion.choices[0].message.content
+                            response = model.generate_content(prompt)
+                            dot_code = response.text
                             
                             # Clean up code blocks if the LLM adds them despite instructions
                             dot_code = dot_code.replace("```dot", "").replace("```graphviz", "").replace("```", "").strip()
